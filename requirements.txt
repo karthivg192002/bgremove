@@ -1,5 +1,6 @@
 fastapi
 uvicorn
-rembg
+rembg[cpu]
+rembg[gpu]
 pillow
 python-multipart

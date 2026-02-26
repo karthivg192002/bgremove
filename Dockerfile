@@ -20,6 +20,6 @@ COPY . .
 # make sure folders exist
 RUN mkdir -p uploads outputs assets
 
-EXPOSE 8080
+EXPOSE 3001
 
-CMD ["python", "run.py"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3001"]
