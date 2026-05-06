@@ -11,10 +11,14 @@ router = APIRouter()
 @router.post("/remove-background")
 async def remove_background(file: UploadFile = File(...)):
 
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    ALLOWED_TYPES = {"image/jpeg", "image/jpg", "image/webp", "image/png"}
+    ALLOWED_EXTENSIONS = {".jpeg", ".jpg", ".webp", ".png"}
 
-    file_ext = os.path.splitext(file.filename)[1]
+    file_ext = os.path.splitext(file.filename)[1].lower()
+
+    if file.content_type not in ALLOWED_TYPES or file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only JPEG, JPG, WEBP, and PNG images are allowed")
+
     filename = f"{uuid.uuid4().hex}{file_ext}"
     upload_path = os.path.join(UPLOAD_DIR, filename)
 
