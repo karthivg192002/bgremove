@@ -27,4 +27,7 @@ async def remove_background(file: UploadFile = File(...)):
 
     output_path = BackgroundRemoveService.remove_background_and_add_watermark(upload_path)
 
-    return FileResponse(output_path, media_type="image/png",filename="bg_removed.png")
+    if not os.path.exists(output_path):
+        raise HTTPException(status_code=500, detail="Output file was not created")
+
+    return FileResponse(output_path, media_type="image/webp", filename="bg_removed.webp")

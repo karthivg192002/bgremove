@@ -111,7 +111,7 @@ class BackgroundRemoveService:
 
         Returns path to the saved output PNG.
         """
-        output_filename = f"{uuid.uuid4().hex}.png"
+        output_filename = f"{uuid.uuid4().hex}.webp"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
 
         # 1 ── Remove background
@@ -153,7 +153,7 @@ class BackgroundRemoveService:
                 result, WATERMARK_LOGO
             )
 
-        result.save(output_path, format="PNG", compress_level=0)
+        result.save(output_path, format="WEBP", quality=85, method=4)
         return output_path
 
     # Backward-compat shim
