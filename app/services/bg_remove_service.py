@@ -1,93 +1,38 @@
-from rembg import remove
-from PIL import Image, ImageFilter, ImageDraw
-import uuid
 import os
+import uuid
 import math
 from collections import Counter
+
+import numpy as np
+from rembg import remove, new_session
+from PIL import Image, ImageFilter, ImageDraw
 
 from app.core.config import OUTPUT_DIR, WATERMARK_LOGO
 
 
+# ── Rembg session — loaded once at import time ────────────────────────────────
+_SESSION = new_session("u2net")
+
+
 # ── Tamil Nadu Saree palette presets ─────────────────────────────────────────
-# hue: (low, high) degrees — wrapping supported for reds (e.g. 340-20)
 PALETTE_PRESETS = [
-    {
-        "name": "rose_cream",
-        "hue": (340, 20),           # deep reds / magentas wrapping 360
-        "top":     (255, 245, 245),
-        "bottom":  (240, 200, 200),
-        "vignette":(200, 160, 160),
-    },
-    {
-        "name": "ivory_blush",
-        "hue": (0, 20),             # red-orange
-        "top":     (255, 250, 245),
-        "bottom":  (245, 215, 200),
-        "vignette":(210, 170, 155),
-    },
-    {
-        "name": "warm_sand",
-        "hue": (20, 45),            # orange / rust
-        "top":     (255, 248, 230),
-        "bottom":  (240, 215, 170),
-        "vignette":(200, 170, 120),
-    },
-    {
-        "name": "pale_gold",
-        "hue": (45, 65),            # yellow / gold
-        "top":     (255, 252, 220),
-        "bottom":  (245, 225, 150),
-        "vignette":(205, 180, 100),
-    },
-    {
-        "name": "light_mint",
-        "hue": (65, 90),            # yellow-green
-        "top":     (240, 255, 235),
-        "bottom":  (200, 235, 200),
-        "vignette":(155, 195, 155),
-    },
-    {
-        "name": "soft_sage",
-        "hue": (90, 150),           # green
-        "top":     (235, 250, 240),
-        "bottom":  (190, 230, 205),
-        "vignette":(140, 190, 160),
-    },
-    {
-        "name": "light_aqua",
-        "hue": (150, 200),          # teal / cyan
-        "top":     (230, 250, 255),
-        "bottom":  (180, 225, 240),
-        "vignette":(130, 185, 205),
-    },
-    {
-        "name": "pale_blue",
-        "hue": (200, 240),          # blue
-        "top":     (230, 240, 255),
-        "bottom":  (185, 205, 245),
-        "vignette":(140, 165, 215),
-    },
-    {
-        "name": "lavender",
-        "hue": (240, 290),          # violet / purple
-        "top":     (245, 235, 255),
-        "bottom":  (215, 195, 245),
-        "vignette":(170, 145, 210),
-    },
-    {
-        "name": "soft_pink",
-        "hue": (290, 340),          # pink / hot-pink
-        "top":     (255, 235, 248),
-        "bottom":  (245, 195, 230),
-        "vignette":(210, 150, 195),
-    },
+    {"name": "rose_cream",   "hue": (340, 20),  "top": (255, 245, 245), "bottom": (240, 200, 200), "vignette": (200, 160, 160)},
+    {"name": "ivory_blush",  "hue": (0,   20),  "top": (255, 250, 245), "bottom": (245, 215, 200), "vignette": (210, 170, 155)},
+    {"name": "warm_sand",    "hue": (20,  45),  "top": (255, 248, 230), "bottom": (240, 215, 170), "vignette": (200, 170, 120)},
+    {"name": "pale_gold",    "hue": (45,  65),  "top": (255, 252, 220), "bottom": (245, 225, 150), "vignette": (205, 180, 100)},
+    {"name": "light_mint",   "hue": (65,  90),  "top": (240, 255, 235), "bottom": (200, 235, 200), "vignette": (155, 195, 155)},
+    {"name": "soft_sage",    "hue": (90,  150), "top": (235, 250, 240), "bottom": (190, 230, 205), "vignette": (140, 190, 160)},
+    {"name": "light_aqua",   "hue": (150, 200), "top": (230, 250, 255), "bottom": (180, 225, 240), "vignette": (130, 185, 205)},
+    {"name": "pale_blue",    "hue": (200, 240), "top": (230, 240, 255), "bottom": (185, 205, 245), "vignette": (140, 165, 215)},
+    {"name": "lavender",     "hue": (240, 290), "top": (245, 235, 255), "bottom": (215, 195, 245), "vignette": (170, 145, 210)},
+    {"name": "soft_pink",    "hue": (290, 340), "top": (255, 235, 248), "bottom": (245, 195, 230), "vignette": (210, 150, 195)},
 ]
 
 NEUTRAL_PRESET = {
-    "name":    "neutral_white",
-    "top":     (255, 255, 255),
-    "bottom":  (235, 235, 240),
-    "vignette":(195, 195, 205),
+    "name":     "neutral_white",
+    "top":      (255, 255, 255),
+    "bottom":   (235, 235, 240),
+    "vignette": (195, 195, 205),
 }
 
 
@@ -100,30 +45,13 @@ class BackgroundRemoveService:
         input_path: str,
         add_watermark: bool = True,
     ) -> str:
-        """
-        Full pipeline:
-          1. Remove background with rembg.
-          2. Analyse subject's dominant hue.
-          3. Auto-select a complementary light gradient background.
-          4. Apply vignette for studio look.
-          5. Composite subject over background.
-          6. Optionally add a rounded white-bg watermark.
-
-        Returns path to the saved output PNG.
-        """
         output_filename = f"{uuid.uuid4().hex}.webp"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-        # 1 ── Remove background
+        # 1 ── Remove background (reuse cached session; no alpha_matting for speed)
         with Image.open(input_path) as img:
             img = img.convert("RGBA")
-            subject: Image.Image = remove(
-                img,
-                alpha_matting=True,
-                alpha_matting_foreground_threshold=240,
-                alpha_matting_background_threshold=10,
-                alpha_matting_erode_size=10,
-            )
+            subject: Image.Image = remove(img, session=_SESSION)
 
         # 2 ── Sharpen edges
         subject = subject.filter(
@@ -132,16 +60,12 @@ class BackgroundRemoveService:
 
         width, height = subject.size
 
-        # 3 ── Pick background based on image dominant colour
+        # 3 ── Pick background based on dominant colour
         preset = BackgroundRemoveService._pick_background_preset(subject)
 
-        # 4 ── Build gradient + vignette background
-        background = BackgroundRemoveService._create_gradient(
-            width, height, preset["top"], preset["bottom"]
-        )
-        vignette = BackgroundRemoveService._create_vignette(
-            width, height, preset["vignette"]
-        )
+        # 4 ── Build gradient + vignette background (numpy — no Python loops)
+        background = BackgroundRemoveService._create_gradient(width, height, preset["top"], preset["bottom"])
+        vignette   = BackgroundRemoveService._create_vignette(width, height, preset["vignette"])
         background = Image.alpha_composite(background, vignette)
 
         # 5 ── Composite subject
@@ -149,28 +73,21 @@ class BackgroundRemoveService:
 
         # 6 ── Rounded-corner white-bg watermark
         if add_watermark and os.path.exists(WATERMARK_LOGO):
-            result = BackgroundRemoveService._add_rounded_watermark(
-                result, WATERMARK_LOGO
-            )
+            result = BackgroundRemoveService._add_rounded_watermark(result, WATERMARK_LOGO)
 
-        result.save(output_path, format="WEBP", quality=85, method=4)
+        # method=0 is the fastest WebP encoder; quality=85 keeps file size small
+        result.save(output_path, format="WEBP", quality=85, method=0)
         return output_path
 
     # Backward-compat shim
     @staticmethod
     def remove_background_and_add_watermark(input_path: str) -> str:
-        return BackgroundRemoveService.remove_background_and_add_ecommerce_background(
-            input_path
-        )
+        return BackgroundRemoveService.remove_background_and_add_ecommerce_background(input_path)
 
     # ── Dominant colour analysis ──────────────────────────────────────────────
 
     @staticmethod
     def _pick_background_preset(subject: Image.Image) -> dict:
-        """
-        Downsample the subject, collect hues from opaque mid-tone pixels,
-        find the most common hue bucket and return the matching preset.
-        """
         small = subject.resize((80, 80), Image.LANCZOS).convert("RGBA")
         pixels = list(small.getdata())
 
@@ -181,20 +98,18 @@ class BackgroundRemoveService:
         hues = []
         for r, g, b in opaque:
             h, s, v = BackgroundRemoveService._rgb_to_hsv(r, g, b)
-            # Ignore very dark, very light, or washed-out pixels
             if s > 0.15 and 0.15 < v < 0.95:
                 hues.append(int(h))
 
         if not hues:
             return NEUTRAL_PRESET
 
-        # 10-degree hue buckets
         bucketed = [h // 10 * 10 for h in hues]
         dominant_hue = Counter(bucketed).most_common(1)[0][0]
 
         for preset in PALETTE_PRESETS:
             lo, hi = preset["hue"]
-            if lo > hi:                              # wraps around 360°
+            if lo > hi:
                 if dominant_hue >= lo or dominant_hue <= hi:
                     return preset
             else:
@@ -222,44 +137,33 @@ class BackgroundRemoveService:
         s = 0.0 if cmax == 0 else delta / cmax
         return h, s, cmax
 
-    # ── Background helpers ────────────────────────────────────────────────────
+    # ── Background helpers (numpy — no per-pixel Python loops) ────────────────
 
     @staticmethod
-    def _create_gradient(
-        width: int,
-        height: int,
-        top_color: tuple,
-        bottom_color: tuple,
-    ) -> Image.Image:
-        """Smooth top-to-bottom vertical gradient."""
-        base = Image.new("RGBA", (width, height))
-        draw = ImageDraw.Draw(base)
-        for y in range(height):
-            t = y / max(height - 1, 1)
-            r = int(top_color[0] + (bottom_color[0] - top_color[0]) * t)
-            g = int(top_color[1] + (bottom_color[1] - top_color[1]) * t)
-            b = int(top_color[2] + (bottom_color[2] - top_color[2]) * t)
-            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
-        return base
+    def _create_gradient(width: int, height: int, top_color: tuple, bottom_color: tuple) -> Image.Image:
+        t = np.linspace(0, 1, height, dtype=np.float32)[:, np.newaxis]  # (H, 1)
+        arr = np.empty((height, width, 4), dtype=np.uint8)
+        for c in range(3):
+            col = (top_color[c] + (bottom_color[c] - top_color[c]) * t).astype(np.uint8)
+            arr[:, :, c] = np.broadcast_to(col, (height, width))
+        arr[:, :, 3] = 255
+        return Image.fromarray(arr, "RGBA")
 
     @staticmethod
-    def _create_vignette(
-        width: int,
-        height: int,
-        vignette_color: tuple,
-        strength: float = 0.28,
-    ) -> Image.Image:
-        """Radial vignette — darkens corners for a studio-photograph feel."""
-        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(layer)
+    def _create_vignette(width: int, height: int, vignette_color: tuple, strength: float = 0.28) -> Image.Image:
         cx, cy = width / 2, height / 2
-        # Step by 2 px for speed; the feathering hides gaps
-        for x in range(0, width, 2):
-            for y in range(0, height, 2):
-                dist = math.sqrt(((x - cx) / cx) ** 2 + ((y - cy) / cy) ** 2)
-                alpha = int(min(255, 255 * strength * (dist ** 2)))
-                draw.point((x, y), fill=(*vignette_color, alpha))
-        return layer
+        x = np.arange(width,  dtype=np.float32)
+        y = np.arange(height, dtype=np.float32)
+        xx, yy = np.meshgrid(x, y)
+        dist = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2)
+        alpha = np.clip(255 * strength * dist ** 2, 0, 255).astype(np.uint8)
+
+        arr = np.empty((height, width, 4), dtype=np.uint8)
+        arr[:, :, 0] = vignette_color[0]
+        arr[:, :, 1] = vignette_color[1]
+        arr[:, :, 2] = vignette_color[2]
+        arr[:, :, 3] = alpha
+        return Image.fromarray(arr, "RGBA")
 
     # ── Watermark ─────────────────────────────────────────────────────────────
 
@@ -267,41 +171,32 @@ class BackgroundRemoveService:
     def _add_rounded_watermark(
         base_image: Image.Image,
         logo_path: str,
-        bg_color: tuple = (255, 255, 255, 220),   # white, slightly transparent
+        bg_color: tuple = (255, 255, 255, 220),
         corner_radius_ratio: float = 0.22,
         padding_ratio: float = 0.18,
     ) -> Image.Image:
-        """
-        Renders the logo inside a rounded-rectangle white pill bubble,
-        then composites it at the bottom-right of base_image.
-        """
         logo = Image.open(logo_path).convert("RGBA")
 
         base_w, base_h = base_image.size
 
-        # Scale logo to 15 % of base width
         target_logo_w = int(base_w * 0.15)
         scale = target_logo_w / logo.width
         target_logo_h = int(logo.height * scale)
         logo = logo.resize((target_logo_w, target_logo_h), Image.LANCZOS)
 
-        padding = int(max(target_logo_w, target_logo_h) * padding_ratio)
+        padding  = int(max(target_logo_w, target_logo_h) * padding_ratio)
         bubble_w = target_logo_w + padding * 2
         bubble_h = target_logo_h + padding * 2
         radius   = int(bubble_h * corner_radius_ratio)
 
-        # White rounded-rectangle background
         bubble = Image.new("RGBA", (bubble_w, bubble_h), (0, 0, 0, 0))
         ImageDraw.Draw(bubble).rounded_rectangle(
             [(0, 0), (bubble_w - 1, bubble_h - 1)],
             radius=radius,
             fill=bg_color,
         )
-
-        # Centre the logo inside the bubble
         bubble.paste(logo, (padding, padding), logo)
 
-        # Place at bottom-right with 2 % margin
         margin = int(base_w * 0.02)
         pos = (base_w - bubble_w - margin, base_h - bubble_h - margin)
 
